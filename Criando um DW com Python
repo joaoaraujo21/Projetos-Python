@@ -1,0 +1,78 @@
+#Importando Bibliotecas
+import pyodbc
+import pandas as pd
+
+#Fazendo a conexao com o banco que vou extrair os dados 
+dados_conexao =(
+    "Driver={SQL Server};"
+    "Server=DESKTOP-0O9J9LL;"
+    "Database=MestreElectronics;"
+    )
+conexao = pyodbc.connect(dados_conexao)
+
+#Lendo as tabelas do banco com o pandas
+produto_df = pd.read_sql('SELECT * FROM MestreElectronics.dbo.product', conexao)
+categoria_df = pd.read_sql('SELECT * FROM MestreElectronics.dbo.productcategory', conexao)
+subcategoria_df = pd.read_sql('SELECT * FROM MestreElectronics.dbo.productsubcategory', conexao)
+
+#Mesclando as tabelas com as informações uteis
+produto_df = produto_df[['ProductKey', 'ProductName', 'ProductSubcategoryKey', 'BrandName', 'ClassName']].merge(subcategoria_df)
+produto_df = produto_df.merge(categoria_df)
+
+#Deletando colunas chaves que não serão mais utilizadas 
+produto_df = produto_df.drop(['ProductSubcategoryKey', 'ProductCategoryKey'], axis = 1)
+
+#Criando cursor (Necessario para executar consultas em SQL)
+cursor = conexao.cursor()
+
+#Tratativa de erro para quando rodar o codigo
+deletar_tabela = 'USE DW_MestreElectronics drop table DM_Produto'
+cursor.execute(deletar_tabela)
+cursor.commit()
+
+#Criação do banco de dados, e comentei o codigo para não ficar criando toda vez que roda
+#criar_database = 'CREATE DATABASE DW_MestreElectronics'
+#cursor.execute(criar_database)
+#cursor.commit()
+
+#Criando tabela Dimensão Produto
+criar_tabela = '''USE DW_MestreElectronics
+CREATE TABLE DM_Produto(
+    ProductKey int,
+    ProductName varchar(100),
+    BrandName varchar(50),
+    ClassName varchar(50),
+    ProductSubcategoryName varchar(50),
+    ProductCategoryName varchar(50) )'''
+
+cursor.execute(criar_tabela)
+cursor.commit()
+
+# Para inserir linha por linha na tabela que eu criei no banco de dados
+for index, row in produto_df.iterrows():
+     cursor.execute(''' USE DW_MestreElectronics
+     INSERT INTO DM_Produto (ProductKey,ProductName,BrandName,ClassName,ProductSubcategoryName,ProductCategoryName) 
+     values(?,?,?,?,?,?)''', row.ProductKey, row.ProductName, row.BrandName, row.ClassName, row.ProductSubcategoryName, row.ProductCategoryName)
+
+cursor.commit()
+
+# Criando Dimensão de Cliente
+clientes_df  = pd.read_sql('SELECT * FROM MestreElectronics.dbo.Customer', conexao)
+paises_df = pd.read_sql('SELECT * FROM MestreElectronics.dbo.Geography', conexao)
+
+# Concatenando os nomes dos clientes em uma unica coluna 
+clientes_df['NomeCompleto'] = clientes_df['FirstName'].str.cat(clientes_df['LastName'],sep=" ")
+#deletando colunas
+clientes_df = clientes_df.drop(['FirstName', 'LastName','MaritalStatus','EmailAddress','Education'], axis = 1)
+#Deletando Colunas
+paises_df = paises_df.drop(['GeographyType','CityName'], axis = 1)
+
+#Join entre cliente e países
+clientes_df = clientes_df.merge(paises_df)
+
+#Deletando coluna não mais utilizável
+clientes_df = clientes_df.drop('GeographyKey', axis = 1)
+
+#Verificando Tabelas
+display(produto_df)
+display(clientes_df)
